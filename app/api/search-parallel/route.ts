@@ -8,13 +8,23 @@
 import { NextRequest } from 'next/server';
 import { searchVideos } from '@/lib/api/client';
 import { getSourceName } from '@/lib/utils/source-names';
-import { traditionalToSimplified } from '@/lib/utils/chinese-convert';
+import { simplifiedToTraditional, traditionalToSimplified } from '@/lib/utils/chinese-convert';
 
 export const runtime = 'edge';
 
 const MAX_TOTAL_VIDEOS = 2000;
 const MAX_PAGES_PER_SOURCE = 3;
 const PER_SOURCE_TIMEOUT_MS = 20000;
+
+function getQueryVariants(query: string): string[] {
+  const trimmed = query.trim();
+  const variants = new Set<string>([
+    trimmed,
+    traditionalToSimplified(trimmed),
+    simplifiedToTraditional(trimmed),
+  ]);
+  return Array.from(variants).filter(Boolean);
+}
 
 export async function POST(request: NextRequest) {
   const encoder = new TextEncoder();
@@ -43,7 +53,7 @@ export async function POST(request: NextRequest) {
           return;
         }
 
-        const normalizedQuery = traditionalToSimplified(query.trim());
+        const queryVariants = getQueryVariants(query);
         const sources = Array.isArray(sourceConfigs) && sourceConfigs.length > 0
           ? sourceConfigs
           : [];
@@ -76,13 +86,23 @@ export async function POST(request: NextRequest) {
           signal.addEventListener('abort', onRequestAbort, { once: true });
 
           try {
-            const result = await searchVideos(
-              normalizedQuery, [source], 1, sourceController.signal
-            );
+            let selectedQuery = queryVariants[0];
+            let result: Awaited<ReturnType<typeof searchVideos>> = [];
+            let videos: any[] = [];
+            let pagecount = 1;
+
+            for (const queryVariant of queryVariants) {
+              result = await searchVideos(
+                queryVariant, [source], 1, sourceController.signal
+              );
+              videos = result[0]?.results || [];
+              pagecount = result[0]?.pagecount ?? 1;
+              selectedQuery = queryVariant;
+              if (videos.length > 0) break;
+            }
+
             const endTime = performance.now();
             const latency = Math.round(endTime - startTime);
-            const videos = result[0]?.results || [];
-            const pagecount = result[0]?.pagecount ?? 1;
 
             completedSources++;
             totalVideosFound += videos.length;
@@ -121,7 +141,7 @@ export async function POST(request: NextRequest) {
 
                 try {
                   const pageResult = await searchVideos(
-                    normalizedQuery, [source], pg, sourceController.signal
+                    selectedQuery, [source], pg, sourceController.signal
                   );
                   const pageVideos = pageResult[0]?.results || [];
                   totalVideosFound += pageVideos.length;
