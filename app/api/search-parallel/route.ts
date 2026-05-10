@@ -19,8 +19,8 @@ const PER_SOURCE_TIMEOUT_MS = 20000;
 function getQueryVariants(query: string): string[] {
   const trimmed = query.trim();
   const variants = new Set<string>([
-    trimmed,
     traditionalToSimplified(trimmed),
+    trimmed,
     simplifiedToTraditional(trimmed),
   ]);
   return Array.from(variants).filter(Boolean);
